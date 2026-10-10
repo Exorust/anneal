@@ -1,4 +1,4 @@
-# Quickstart (Apple Silicon)
+# Anneal quickstart (Apple Silicon)
 
 This walks through the shipped Metal example end to end on a Mac. It makes no LLM API calls, so it
 needs no API key. The point is to prove your GPU and test setup work before you spend anything on
@@ -17,8 +17,8 @@ exists and needs an Intel GPU plus the oneAPI toolchain; see the README section 
 - A clone of the repository, for the example task and configs:
 
 ```bash
-git clone https://github.com/Exorust/kernelfoundry.git
-cd kernelfoundry
+git clone https://github.com/Exorust/anneal.git
+cd anneal
 uv venv --python 3.12 .venv
 uv pip install --python .venv -e . torch hydra-core pydra_config openai tqdm sqlalchemy \
     numpy python-dotenv pandas scipy celery clang boto3 requests pytest-dependency ninja

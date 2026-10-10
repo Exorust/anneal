@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "kernelfoundry"
+name = "anneal"
 dynamic = ["version"]
-description = "Make a GPU kernel faster: point a coding agent at it, or run the evolutionary search yourself"
+description = "Anneal: LLM-evolutionary optimizer for Apple Metal GPU kernels (fork of KernelFoundry)"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
@@ -77,14 +77,14 @@ mcp = [
     "pyyaml",
     "omegaconf"
 ]
-all = [ "kernelfoundry[ui,algo,dev,docs,mcp]" ]
+all = [ "anneal[ui,algo,dev,docs,mcp]" ]
 
 [project.scripts]
 kernelfoundry-gui = "kernelfoundry.gui.__main__:main"
 
 [project.urls]
-Homepage = "https://github.com/Exorust/kernelfoundry"
-Repository = "https://github.com/Exorust/kernelfoundry"
+Homepage = "https://github.com/Exorust/anneal"
+Repository = "https://github.com/Exorust/anneal"
 
 [tool.setuptools.package-data]
 # include all required files that are not .py but are required in the wheel

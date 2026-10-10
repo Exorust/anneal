@@ -1,4 +1,6 @@
-# KernelFoundry for Apple Silicon
+# Anneal
+
+**LLM-evolutionary optimizer for Apple Metal GPU kernels.** A fork of Intel Labs' KernelFoundry made Apple-Silicon-first. Annealing is the heat treatment that makes metal stronger; this tool does the same to your Metal kernels, one benchmarked generation at a time.
 <img src="./assets/kernelfoundry.png" alt="KernelFoundry Logo" width="200" align="right">
 
 [![Upstream](https://img.shields.io/badge/fork%20of-isl--org%2Fkernelfoundry-0A7E8C?style=flat-square)](https://github.com/isl-org/kernelfoundry)
@@ -6,7 +8,7 @@
 [![Python](https://img.shields.io/badge/python-3.12-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](./LICENSE)
 
-KernelFoundry is an evolutionary optimizer for GPU kernels: it asks an LLM for candidate kernels,
+Anneal (upstream name: KernelFoundry) is an evolutionary optimizer for GPU kernels: it asks an LLM for candidate kernels,
 compiles and benchmarks them on real hardware, keeps the fastest ones that still pass your tests,
 and feeds the results back into the next round. This fork makes **Apple GPUs (M-series, Metal)**
 the primary target. The upstream project by Intel Labs targets SYCL, OpenCL and CUDA; that code is
@@ -20,8 +22,8 @@ version runs about 9x slower than `torch.matmul` on an M5, which is the headroom
 ## Quick start on a Mac
 
 ```bash
-git clone https://github.com/Exorust/kernelfoundry.git
-cd kernelfoundry
+git clone https://github.com/Exorust/anneal.git
+cd anneal
 uv venv --python 3.12 .venv            # hydra does not start on Python 3.14
 uv pip install --python .venv -e . torch hydra-core pydra_config openai tqdm sqlalchemy \
     numpy python-dotenv pandas scipy celery clang boto3 requests pytest-dependency ninja
@@ -208,7 +210,7 @@ This script will output the MCP config file, which you can copy-paste when addin
 
 ### Using KernelFoundry via the MCP server
 
-Point the agent to [`agent-workflow.md`](https://github.com/isl-org/kernelfoundry/blob/main/kernelfoundry/mcp_server/agent-workflow.md) to instruct it how to use KernelFoundry.
+Point the agent to [`agent-workflow.md`](./kernelfoundry/mcp_server/agent-workflow.md) to instruct it how to use KernelFoundry.
 
 A typical prompt is the following (fill in dependent on your use case):
 ```
@@ -221,7 +223,7 @@ Optimize <function> in <file path or upstream URL> for GPU with KernelFoundry (s
 ```
 
 The agent creates the task package (i.e. code for testing the kernel in isolation), validates it, runs the optimization loop and reports the speedup. Full walkthrough:
-[Optimize a kernel with a coding agent](https://isl-org.github.io/kernelfoundry/docs/guide/agentic-workflow.html).
+[Optimize a kernel with a coding agent](docs/guide/agentic-workflow.md).
 
 <details>
 <summary><h4 style="display:inline">Details on MCP server setup and how it works (click to expand) </h4></summary>
@@ -242,11 +244,11 @@ your agent in the *Generate* box.
 5) Optional: submit to the `submit_task` tool to make use of the evolutionary algorithm (this tool can take up to a few hours dependent on the number of iterations)
 
 Further references:
-- **[Optimize a kernel with a coding agent](https://isl-org.github.io/kernelfoundry/docs/guide/agentic-workflow.html)**,
+- **[Optimize a kernel with a coding agent](docs/guide/agentic-workflow.md)**,
   the full walkthrough with a worked example and how to integrate the result.
-- **[MCP server reference](https://github.com/isl-org/kernelfoundry/blob/main/kernelfoundry/mcp_server/README.md)**
+- **[MCP server reference](./kernelfoundry/mcp_server/README.md)**
   for client setup.
-- **[`agent-workflow.md`](https://github.com/isl-org/kernelfoundry/blob/main/kernelfoundry/mcp_server/agent-workflow.md)**, the workflow
+- **[`agent-workflow.md`](./kernelfoundry/mcp_server/agent-workflow.md)**, the workflow
   contract the agent need to follow for creating the kernelfoundry task package and optimizing the kernel.
 </details>
 
@@ -275,8 +277,8 @@ Options: [all], [algo] (to execute the algorithm from CLI), [mcp] (only mcp serv
 Or **install from source**:
 ```
 # Install all dependencies from clone
-git clone https://github.com/isl-org/kernelfoundry.git
-cd kernelfoundry
+git clone https://github.com/Exorust/anneal.git
+cd anneal
 uv pip install -e .[all]
 ```
 
@@ -302,7 +304,7 @@ export OPENAI_API_KEY=...      # server_type: openai
 export ANTHROPIC_API_KEY=...   # server_type: anthropic
 ```
 
-Choose the model and provider in [`kernelfoundry/configs/inference/server.yaml`](https://github.com/isl-org/kernelfoundry/blob/main/kernelfoundry/configs/inference/server.yaml). Any model your provider offers works; `model_name` is passed straight through. 
+Choose the model and provider in [`kernelfoundry/configs/inference/server.yaml`](./kernelfoundry/configs/inference/server.yaml). Any model your provider offers works; `model_name` is passed straight through. 
 
 ### Run the optimization algorithm
 
@@ -335,7 +337,7 @@ Common parameters are:
 | `max_iters` | Optimization iterations (default 3) |
 | `branches_per_iteration` | Candidates generated per iteration (default 2) |
 
-See [Config Parameters](https://isl-org.github.io/kernelfoundry/docs/guide/config-parameters.html) for a full list.
+See [Config Parameters](docs/guide/config-parameters.md) for a full list.
 
 ### Target hardware
 
@@ -392,19 +394,19 @@ It serves `http://localhost:8885` and shows:
 ## Documentation
 
 Full documentation, including the user guide and API reference, is at
-**[isl-org.github.io/kernelfoundry/docs](https://isl-org.github.io/kernelfoundry/docs/index.html)**.
+**[docs/](docs/)** in this repo (upstream copy: [isl-org.github.io/kernelfoundry/docs](https://isl-org.github.io/kernelfoundry/docs/index.html)).
 
 This README covers deciding, installing and getting a first run. The guide covers everything
 after that:
 
 | Guide | What it answers |
 |---|---|
-| [Quickstart](https://isl-org.github.io/kernelfoundry/docs/guide/quickstart.html) | Run the shipped example end to end, no LLM API key needed |
-| [Anatomy of a task package](https://isl-org.github.io/kernelfoundry/docs/guide/task-package.html) | What goes in the folder you submit |
-| [Writing tests](https://isl-org.github.io/kernelfoundry/docs/guide/writing-tests.html) | Correctness tests and the benchmark that speedup is measured from |
-| [Config parameters](https://isl-org.github.io/kernelfoundry/docs/guide/config-parameters.html) | Every parameter worth setting, with defaults |
-| [Understanding results](https://isl-org.github.io/kernelfoundry/docs/guide/understanding-results.html) | Reading a finished run and diagnosing what went wrong |
-| [Optimization strategies](https://isl-org.github.io/kernelfoundry/docs/guide/optimization-strategies.html) | Levers to pull when a run plateaus |
+| [Quickstart](docs/guide/quickstart.md) | Run the shipped example end to end, no LLM API key needed |
+| [Anatomy of a task package](docs/guide/task-package.md) | What goes in the folder you submit |
+| [Writing tests](docs/guide/writing-tests.md) | Correctness tests and the benchmark that speedup is measured from |
+| [Config parameters](docs/guide/config-parameters.md) | Every parameter worth setting, with defaults |
+| [Understanding results](docs/guide/understanding-results.md) | Reading a finished run and diagnosing what went wrong |
+| [Optimization strategies](docs/guide/optimization-strategies.md) | Levers to pull when a run plateaus |
 | [Public API](https://isl-org.github.io/kernelfoundry/docs/api/public.html) | The classes, helpers and fixtures a task author uses |
 
 To build the docs locally:
@@ -424,7 +426,7 @@ Bug reports and pull requests are welcome via
 ## License
 
 Apache License 2.0. See
-[LICENSE](https://github.com/isl-org/kernelfoundry/blob/main/LICENSE).
+[LICENSE](./LICENSE).
 
 ## Citation
 
