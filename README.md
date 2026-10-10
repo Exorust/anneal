@@ -1,59 +1,81 @@
-# KernelFoundry
+# KernelFoundry for Apple Silicon
 <img src="./assets/kernelfoundry.png" alt="KernelFoundry Logo" width="200" align="right">
 
-[![Website](https://img.shields.io/badge/Website-KernelFoundry-0A7E8C?style=flat-square)](https://isl-org.github.io/kernelfoundry/)
+[![Upstream](https://img.shields.io/badge/fork%20of-isl--org%2Fkernelfoundry-0A7E8C?style=flat-square)](https://github.com/isl-org/kernelfoundry)
 [![Paper](https://img.shields.io/badge/Paper-arXiv%3A2603.12440-B31B1B?style=flat-square)](https://arxiv.org/abs/2603.12440)
-[![Docs](https://img.shields.io/badge/Docs-Documentation-1F6FEB?style=flat-square)](https://isl-org.github.io/kernelfoundry/docs/index.html)
-[![Lint](https://github.com/isl-org/kernelfoundry/actions/workflows/black.yml/badge.svg)](https://github.com/isl-org/kernelfoundry/actions/workflows/black.yml)
-[![PyPI](https://img.shields.io/pypi/v/kernelfoundry)](https://pypi.org/project/kernelfoundry/)
-[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://pypi.org/project/kernelfoundry/)
-[![License](https://img.shields.io/badge/license-Apache--2.0-green)](https://github.com/isl-org/kernelfoundry/blob/main/LICENSE)
+[![Python](https://img.shields.io/badge/python-3.12-blue)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-Apache--2.0-green)](./LICENSE)
 
-KernelFoundry is a toolkit for hardware-aware GPU kernel optimization, targeting SYCL, OpenCL and CUDA with a focus on Intel GPUs.
+KernelFoundry is an evolutionary optimizer for GPU kernels: it asks an LLM for candidate kernels,
+compiles and benchmarks them on real hardware, keeps the fastest ones that still pass your tests,
+and feeds the results back into the next round. This fork makes **Apple GPUs (M-series, Metal)**
+the primary target. The upstream project by Intel Labs targets SYCL, OpenCL and CUDA; that code is
+kept so upstream fixes can still be merged, but nothing here requires an Intel or NVIDIA GPU.
 
-The simplest way to use KernelFoundry is its MCP server and custom agent. From your usual coding IDE, install the KF agent and tools and point the agent at a slow GPU kernel. The agent isolates the kernel, builds a reference implementation to beat, finds your existing tests or writes new ones, and derives benchmark sizes from how the code is actually called — asking you only about what it can't work out on its own.
+On a Mac a kernel is a plain Python file: the Metal Shading Language source sits in a string and is
+compiled at runtime by `torch.mps.compile_shader` (PyTorch 2.7 or newer). There is no compiler to
+install, no Xcode requirement and no build step. The shipped example is a matrix multiply whose naive
+version runs about 9x slower than `torch.matmul` on an M5, which is the headroom the optimizer works on.
 
-From there, KernelFoundry generates, compiles, benchmarks and profiles candidate kernels on real hardware, keeping the fastest ones that still pass those tests. On KernelBench it reaches 2.3x geometric-mean speedup for SYCL ([paper](https://arxiv.org/abs/2603.12440)).
+## Quick start on a Mac
 
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="./docs/assets/architecture-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="./docs/assets/architecture-light.svg">
-    <img src="./docs/assets/architecture-light.svg" alt="KernelFoundry optimization workflow diagram" width="860">
-  </picture>
-  <br>
-  <sub>
-    A coding agent turns the input into a task package of reference, kernel-wrapper and tests, which you can also author yourself. The task package enters an optimization loop, driven either by (A) the evaluation tool in a modify-and-test cycle or (B) an evolutionary algorithm searching for the best kernel autonomously. The loop generates, compiles, benchmarks on a real GPU and profiles candidates, feeding test results, runtime stats and profiler feedback back into generation, and emits an optimized kernel to integrate back into your code.
-  </sub>
-</p>
+```bash
+git clone https://github.com/Exorust/kernelfoundry.git
+cd kernelfoundry
+uv venv --python 3.12 .venv            # hydra does not start on Python 3.14
+uv pip install --python .venv -e . torch hydra-core pydra_config openai tqdm sqlalchemy \
+    numpy python-dotenv pandas scipy celery clang boto3 requests pytest-dependency ninja
+source .venv/bin/activate
 
+# 1. Prove the task, the GPU and the benchmark fixture work (no LLM involved)
+cd tasks/example_metal
+pytest --ref -s task.py          # tests + timings for the torch.matmul reference
+pytest -s task.py                # the same for the naive Metal kernel
+cd ../..
+
+# 2. Run the full evaluation pipeline without generating anything
+python -m kernelfoundry.algorithm run task=tasks/example_metal task_origin=custom \
+    job_name=metal_check gpu_arch=apple_m5 language=metal validate=true max_iters=0
+
+# 3. Optimize for real (needs an API key; pick the model in kernelfoundry/configs/inference/server.yaml)
+export ANTHROPIC_API_KEY=...     # or OPENAI_API_KEY with server_type: openai
+python -m kernelfoundry.algorithm run task=tasks/example_metal task_origin=custom \
+    job_name=metal_opt gpu_arch=apple_m5 language=metal
+```
+
+On macOS `language` defaults to `metal` and `gpu_arch` to the detected chip (`apple_m5`, or the
+generic `apple`) when they are left unset. Results land in `runs/`; `kernelfoundry-gui` shows them.
+
+### What a Metal task looks like
+
+`tasks/example_metal/` has four files: `config.yaml` (`language: metal`, `has_build_step: false`),
+`task.py` (reference, fixtures, correctness tests, benchmark), `matmul_kernel.py` (the Metal source
+inside `[EVOLVE_START]` / `[EVOLVE_END]`, plus a `launch` helper and the torch wrapper) and
+`conftest.py` (do not edit). Only the evolve block is rewritten by the optimizer, so the LLM can change
+the shader and the dispatch geometry but not the Python interface the tests call.
+
+### Not yet done on Apple
+
+- **No profiler feedback.** Upstream feeds unitrace / ncu counters back into the prompt. On Metal the
+  optimizer runs on timings alone. An `xctrace`-based profiler would slot into
+  `kernelfoundry/eval_pipeline/profiler_command.py`.
+- **No KernelBench baselines** for Apple chips, so no cross-run speedup tables yet.
+- **Hardware profile** exists only for the M5 (`apple_m5`); other chips use the generic `apple`
+  entry in `kernelfoundry/eval_pipeline/utils/gpu_specs.py`. Add a row to get chip-specific prompt context.
 
 ## Core concepts
 
 - **Task**: one kernel you want to speed up, defined by a reference implementation plus tests.
 - **Job**: one run of the optimization on a task. A task can have many jobs.
 - **Task package**: the folder KernelFoundry evaluates: kernel file, reference, tests, and
-  `config.yaml`. The agent builds it for you, or you write it yourself. See [Anatomy of a task package](https://isl-org.github.io/kernelfoundry/docs/guide/task-package.html) for the full specification.
+  `config.yaml`. The agent builds it for you, or you write it yourself. See [Anatomy of a task package](docs/guide/task-package.md) for the full specification.
 - **EVOLVE block**: the part of the kernel code that is modified in the optimization loop, marked
   `[EVOLVE_START]` / `[EVOLVE_END]`. Everything outside it (e.g. tests) is left untouched at that point.
 
-## Quick start with Dev Container
+## Other platforms (inherited from upstream)
 
-The fastest way to set up KernelFoundry is by cloning the [example repository](https://github.com/isl-org/kernelfoundry.examples), which comes with a dev container configuration with dependencies preinstalled for Intel GPU development. Click on the badge to clone the example; VS Code then offers to reopen it in the container.
-
-<p align="center">
-  <a href="https://vscode.dev/redirect?url=vscode%3A%2F%2Fvscode.git%2Fclone%3Furl%3Dhttps%3A%2F%2Fgithub.com%2Fisl-org%2Fkernelfoundry.examples">
-    <img src="https://img.shields.io/static/v1?label=Dev%20Containers&message=Clone%20the%20example&color=blue&logo=visualstudiocode" alt="Clone the example" />
-  </a>
-</p>
-
-Requires a Linux host system with Intel GPU drivers, Docker, and VS Code with the Dev Containers extension.
-
-
-## Getting started
-
-Running KernelFoundry requires a GPU and a working toolchain for your GPU vendor, plus an
-optional profiler. Expand this section for the full toolchain setup.
+On Linux or Windows with an Intel or NVIDIA GPU the upstream toolchains still work unchanged.
+Expand this section for the full toolchain setup.
 
 <details>
 <summary><h3 style="display:inline">GPU toolchain, compiler and profiler setup (click to expand) </h3></summary>
@@ -103,6 +125,12 @@ source /opt/intel/oneapi/setvars.sh
 On Windows, do not source the full oneAPI environment. Instead, put only the compiler/ocloc/MSVC/Windows SDK toolchain directories on `PATH` and set `INCLUDE`, `LIB`, `LIBPATH`, and `CMPLR_ROOT`. Also pass `gpu_arch` explicitly, because Intel GPU detection on Windows can pick up an NVIDIA card and forward the wrong architecture to the compiler. In addition, torch/MSVC incompatibilities can trigger `C2872: 'std': ambiguous symbol`, and CUDA and Intel torch wheels are mutually exclusive, so separate virtual environments are required for each accelerator family.
 
 On NVIDIA GPUs, install the CUDA toolkit instead; `ncu` ships with it and is the default profiler there.
+
+**Apple Silicon (macOS):** no toolchain is needed. Set `language: metal` and `gpu_arch: apple_m5`
+(or the generic `apple`); kernels are Metal Shading Language strings inside a Python file, compiled
+at runtime through `torch.mps.compile_shader` (PyTorch 2.7+). There is no build step and no profiler
+yet, so the optimizer runs on timings alone. Start from `tasks/example_metal/`. Use Python 3.12: hydra
+does not start on Python 3.14.
 
 ### Install a profiler
 
@@ -256,7 +284,9 @@ uv pip install -e .[all]
 Torch is NOT a requirement for running KernelFoundry; it is only required if the task package is using torch tensors, e.g. to move data to the GPU. However, it is needed for KernelBench examples.
 
 ```
-# Install torch. Intel GPUs (XPU wheels):
+# Install torch. Apple Silicon: the default PyPI wheel (2.7+) already includes Metal/MPS:
+python -m pip install torch
+# Intel GPUs (XPU wheels):
 python -m pip install torch==2.9 torchvision==0.24 torchaudio==2.9.0 --index-url https://download.pytorch.org/whl/xpu
 # NVIDIA GPUs instead:
 python -m pip install torch==2.13.0 --index-url https://download.pytorch.org/whl/cu130
@@ -279,11 +309,13 @@ Choose the model and provider in [`kernelfoundry/configs/inference/server.yaml`]
 Two examples are provided within the repo. Running them requires cloning the repo instead of pip installing it, so that the task files are found. Both of them require a torch installation in the unit tests.
 
 ```
-# Optimize a KernelBench task 
+# Optimize your own Metal task (Apple Silicon)
+python -m kernelfoundry.algorithm run task=tasks/example_metal task_origin=custom \
+    job_name=my_metal_experiment gpu_arch=apple_m5 language=metal
+
+# Upstream examples (Intel GPU): a KernelBench task and the SYCL custom task
 python -m kernelfoundry.algorithm run task=19_ReLU task_origin=KernelBench \
     job_name=my_experiment gpu_arch=lnl language=SYCL
-
-# Optimize your own task
 python -m kernelfoundry.algorithm run task=tasks/example_custom task_origin=custom \
     job_name=my_custom_experiment gpu_arch=lnl language=SYCL
 ```
@@ -298,7 +330,7 @@ Common parameters are:
 | `task` | Path to a task folder, or a KernelBench task ID (e.g. `19_ReLU`) |
 | `task_origin` | `KernelBench`, `robust_kbench`, or `custom` |
 | `gpu_arch` | Target architecture. See [Target hardware](#target-hardware) |
-| `language` | `SYCL`, `OCL`, `CUDA` or `triton` (defaults by GPU vendor) |
+| `language` | `metal`, `SYCL`, `OCL`, `CUDA` or `triton` (defaults to `metal` on macOS, else by GPU vendor) |
 | `job_name` | Your label for the run; appears in the UI |
 | `max_iters` | Optimization iterations (default 3) |
 | `branches_per_iteration` | Candidates generated per iteration (default 2) |
@@ -307,11 +339,12 @@ See [Config Parameters](https://isl-org.github.io/kernelfoundry/docs/guide/confi
 
 ### Target hardware
 
-| | Intel GPU | NVIDIA GPU |
-|---|---|---|
-| Languages | SYCL, OpenCL | CUDA |
-| `gpu_arch` values | `lnl` (Lunar Lake), `ptl` (Panther Lake), `bmg` (Battlemage), `dg2` (Flex 170 / Arc A770) | `Ampere` is the only one with a hardware profile and baselines. `Maxwell`, `Pascal`, `Volta`, `Turing`, `Hopper`, `Ada` and `native` run, but without hardware-specific prompt context or a KernelBench speedup figure |
-| Default profiler | unitrace for SYCL, VTune for OpenCL | ncu (ships with the CUDA toolkit) |
+| | Apple GPU | Intel GPU | NVIDIA GPU |
+|---|---|---|---|
+| Languages | Metal (`metal`) | SYCL, OpenCL | CUDA |
+| `gpu_arch` values | `apple_m5`, or generic `apple` | `lnl` (Lunar Lake), `ptl` (Panther Lake), `bmg` (Battlemage), `dg2` (Flex 170 / Arc A770) | `Ampere` is the only one with a hardware profile and baselines. `Maxwell`, `Pascal`, `Volta`, `Turing`, `Hopper`, `Ada` and `native` run, but without hardware-specific prompt context or a KernelBench speedup figure |
+| Default profiler | none yet | unitrace for SYCL, VTune for OpenCL | ncu (ships with the CUDA toolkit) |
+| Compile step | none, runtime `torch.mps.compile_shader` | icpx / torch extension | nvcc / torch extension |
 
 `gpu_arch` and `language` must agree: a CUDA architecture requires `language: CUDA`. Both accept
 a comma-separated list to benchmark on several targets.

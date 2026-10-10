@@ -1,9 +1,7 @@
 name: Release
 
+# Fork: releases are manual only. Upstream published to PyPI on every push to main.
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 permissions:

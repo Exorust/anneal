@@ -83,8 +83,8 @@ all = [ "kernelfoundry[ui,algo,dev,docs,mcp]" ]
 kernelfoundry-gui = "kernelfoundry.gui.__main__:main"
 
 [project.urls]
-Homepage = "https://github.com/isl-org/kernelfoundry"
-Repository = "https://github.com/isl-org/kernelfoundry"
+Homepage = "https://github.com/Exorust/kernelfoundry"
+Repository = "https://github.com/Exorust/kernelfoundry"
 
 [tool.setuptools.package-data]
 # include all required files that are not .py but are required in the wheel

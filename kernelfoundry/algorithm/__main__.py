@@ -89,6 +89,31 @@ def _store_task_and_get_id(task, task_origin: str, store_generated_kernels_in_db
     return task_id
 
 
+def _apply_platform_defaults(config: DictConfig) -> DictConfig:
+    """Fill in ``language`` and ``gpu_arch`` when left null. On macOS with an Apple GPU this means
+    ``metal`` and the detected chip (e.g. ``apple_m5``); elsewhere the values stay null and the
+    upstream vendor inference applies."""
+    if config.get("language") is not None and config.get("gpu_arch") is not None:
+        return config
+    if sys.platform != "darwin":
+        return config
+    try:
+        import torch
+
+        if not torch.backends.mps.is_available():
+            return config
+    except ImportError:
+        return config
+    from kernelfoundry.eval_pipeline.utils.sysinfo import get_apple_gpu_arch
+
+    if config.get("language") is None:
+        config.language = "metal"
+    if config.get("gpu_arch") is None:
+        config.gpu_arch = get_apple_gpu_arch() or "apple"
+    logging.info(f"Apple GPU detected: defaulting to language={config.language}, gpu_arch={config.gpu_arch}")
+    return config
+
+
 def _merge_run_config(
     config: DictConfig,
     task_config: DictConfig,
@@ -107,6 +132,7 @@ def _merge_run_config(
 
     OmegaConf.set_struct(config, True)
     merged_config = OmegaConf.merge(config, task_config, metadata.get("overrides", {}), cmdline_overrides)
+    merged_config = _apply_platform_defaults(merged_config)
 
     logging.info("Overrides applied:\n" + dict_to_yaml_str(metadata.get("overrides", {}), indent=2))
     logging.info("Command-line overrides:\n" + dict_to_yaml_str(cmdline_overrides, indent=2))

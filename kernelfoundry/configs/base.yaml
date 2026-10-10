@@ -30,8 +30,8 @@ job_id: null
 agentic_workflow: false
 
 # what to generate
-language: null # if null, it will use CUDA on nvidia gpus and SYCL on intel GPUs
-gpu_arch: null # if null, will use Ampere for nvidia and dg2 on intel GPUs
+language: null # if null: metal on macOS with an Apple GPU, else CUDA on nvidia gpus and SYCL on intel GPUs
+gpu_arch: null # if null: the detected Apple chip (e.g. apple_m5) on macOS, else Ampere for nvidia and dg2 on intel GPUs
 
 # functional vs class mode (only functional supported currently!)
 mode: "functional"  # "functional" or "class" (functional is ai cuda engineer scheme)
