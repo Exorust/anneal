@@ -392,16 +392,23 @@ def measure_runtime_torch(
             )
     elif torch.cuda.is_available():
         torch_acc = torch.cuda
+    elif torch.backends.mps.is_available():
+        torch_acc = torch.mps  # Apple GPU; torch.mps.synchronize() takes no device argument
     else:
-        # raise error if neither torch.xpu or torch.cuda are found
+        # raise error if neither torch.xpu, torch.cuda nor torch.mps are found
         raise ValueError(
-            f"Neither torch.xpu.is_available() nor torch.cuda.is_available() is true in torch {torch.__version__}. "
+            f"None of torch.xpu, torch.cuda or torch.backends.mps is available in torch {torch.__version__}. "
             f"Install the appropriate torch build for your device to use measure_runtime_torch."
         )
 
+    if torch_acc is torch.mps:
+        sync_fn = lambda: torch.mps.synchronize()
+    else:
+        sync_fn = lambda: torch_acc.synchronize(device)
+
     result = measure_runtime(
         target=target,
-        sync_fn=lambda: torch_acc.synchronize(device),
+        sync_fn=sync_fn,
         args=args,
         kwargs=kwargs,
         warmup_min_time=warmup_min_time,

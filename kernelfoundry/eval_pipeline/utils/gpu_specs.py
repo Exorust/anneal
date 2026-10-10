@@ -12,6 +12,24 @@ import kernelfoundry.eval_pipeline.utils.hw_datatypes as hw_dt
 #   return the supported GPU datatypes for GPU of 268V
 
 GPU_SPEC_INFO = {
+    # Apple Silicon. Shared Metal limits are exact; throughput figures are approximate public numbers.
+    "Apple Silicon": {
+        "GPU Architecture": "Apple GPU (Metal), unified memory shared with the CPU",
+        "SIMD width (threads per simdgroup)": "32",
+        "Maximum threads per threadgroup": "1024",
+        "Threadgroup memory per threadgroup": "32 KB",
+        "Matrix units": "simdgroup_matrix 8x8 (float, half, bfloat)",
+    },
+    "Apple M5": {
+        "GPU Architecture": "Apple M5 GPU (Metal 4), 10 cores, Neural Accelerator per core, unified memory",
+        "GPU Memory": "unified, up to 32 GB shared with CPU",
+        "Memory Bandwidth": "153 GB/s (approximate)",
+        "FP32 TFLOPS": "about 4 (approximate)",
+        "SIMD width (threads per simdgroup)": "32",
+        "Maximum threads per threadgroup": "1024",
+        "Threadgroup memory per threadgroup": "32 KB",
+        "Matrix units": "simdgroup_matrix 8x8 (float, half, bfloat)",
+    },
     "L40S": {
         "GPU Architecture": "Ada",
         "GPU Memory": "48GB GDDR6 with ECC",
@@ -388,6 +406,8 @@ GPU_SPEC_INFO_BY_CPU_NAME = {
 
 # in the prompt, for every kernel result we need to specify which hardware it ran on
 ARCH_TO_NAME = {
+    "apple": "Apple Silicon GPU",
+    "apple_m5": "Apple M5",
     "dg2": "Intel Flex 170 / Arc A770",
     # "Ampere": "Nvidia GeForce3090",
     # "ampere": "Nvidia GeForce3090",
@@ -417,6 +437,8 @@ ARCH_TO_NAME = {
 
 # for the prompt, the user specifies a gpu arch and we need to include the corresponding specs in the prompt
 ARCH_TO_SPECS = {
+    "apple": GPU_SPEC_INFO["Apple Silicon"],
+    "apple_m5": GPU_SPEC_INFO["Apple M5"],
     "dg2": GPU_SPEC_INFO["Flex 170"],
     "bmg": GPU_SPEC_INFO["B580"],  # keep bmg for backward compatibility, route to b580
     "b580": GPU_SPEC_INFO["B580"],

@@ -5,6 +5,7 @@ Example tasks and an interface to commonly used benchmarks.
 | Directory | Contents |
 | --- | --- |
 | `example_custom/` | A complete SYCL matrix-multiply task. The best starting point for your own. |
+| `example_metal/` | The same matrix multiply as a Metal kernel for Apple GPUs; Python file, no build step. |
 | `kernelbench/` | Template for converting a KernelBench task into KernelFoundry format. |
 | `pytorch_functionals.csv` | Reference PyTorch operations used by the KernelBench tasks. |
 

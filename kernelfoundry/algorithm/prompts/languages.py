@@ -2,10 +2,10 @@
 Define extraction patterns, file endings, and profiler for all supported languages
 """
 
-SUPPORTED_LANGUAGES = ["cuda", "sycl", "triton", "ocl"]
+SUPPORTED_LANGUAGES = ["cuda", "sycl", "triton", "ocl", "metal"]
 
 # extraction patterns for code blocks, e.g. ```CUDA
-EXTRACT_CODE_LANGUAGES = ["cuda", "sycl", "python", "cpp", "triton", "ocl"]
+EXTRACT_CODE_LANGUAGES = ["cuda", "sycl", "python", "cpp", "triton", "ocl", "metal"]
 
 
 KERNEL_OPTIMIZATION_TIPS = {
@@ -61,6 +61,20 @@ KERNEL_OPTIMIZATION_TIPS = {
         "Use tl.arange and tl.full efficiently for index generation and tensor initialization.",
         "Align input tensors in memory for efficient access.",
         "Fuse operations into a single kernel when possible to reduce launch overhead and improve data locality.",
+    ],
+    "metal": [
+        "Keep the whole file as Python: the Metal Shading Language source lives in a string compiled with torch.mps.compile_shader(source); the returned library exposes each `kernel void name(...)` as lib.name(*buffers_and_scalars, threads=..., group_size=...). Pass torch tensors on the mps device as buffers and Python ints/floats as `constant` scalars.",
+        "Coalesced Access: adjacent threads in a simdgroup (32 lanes on Apple GPUs) should read adjacent addresses. For row-major data, map thread_position_in_grid.x to the contiguous (column) dimension.",
+        "Use threadgroup memory for data reused by threads in a threadgroup: `threadgroup float tile[TILE][TILE+1];` loaded cooperatively, then `threadgroup_barrier(mem_flags::mem_threadgroup)` before use. Threadgroup memory is limited to 32 KB per threadgroup.",
+        "Vectorize memory traffic with float4/half4 loads and stores; the unified memory system is bandwidth-bound, so halving bytes moved (half/bfloat storage, float accumulate) often beats more ALU work.",
+        "Use simdgroup collectives instead of threadgroup barriers where possible: simd_sum, simd_max, simd_shuffle_down, simd_broadcast are barrier-free within the 32-lane simdgroup.",
+        "For matrix multiply use simdgroup matrices: `simdgroup_float8x8 a, b, c; simdgroup_load(a, ptr, stride); simdgroup_multiply_accumulate(c, a, b, c); simdgroup_store(c, out, stride);` -- the Apple analogue of tensor cores.",
+        "Pick group_size as a multiple of 32 (threads_per_simdgroup); 256 is a good default for element-wise kernels, (16,16) or (32,8) for 2D tiles. Max 1024 threads per threadgroup.",
+        "Compute multiple outputs per thread (register blocking, e.g. a 4x4 micro-tile per thread) to raise arithmetic intensity; keep accumulators in registers as float4.",
+        "Use fma() and `#pragma unroll` for small fixed-trip loops; prefer fast:: math when precision allows (fast::exp, fast::rsqrt).",
+        "Bounds-check every thread against the problem size (`if (gid.x >= N) return;`) because dispatch grids are not required to be multiples of the threadgroup size; never read or write out of range.",
+        "Avoid divergent branches inside a simdgroup; use select() or ternaries for boundary handling instead of if/else on per-thread data.",
+        "Keep data on the mps device; never call .cpu() or .item() inside the kernel wrapper. Allocate the output once with torch.empty on the same device and pass it as a buffer.",
     ],
     "OCL": [
         "Coalesced Access: Ensure work-items in the same wavefront/warp access contiguous memory addresses. For row-major data, have adjacent work-items (consecutive get_global_id(0)) access adjacent memory locations. Use linear indexing that matches your data layout.",

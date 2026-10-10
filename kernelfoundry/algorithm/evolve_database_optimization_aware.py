@@ -62,6 +62,9 @@ from kernelfoundry.algorithm.utils.map_elites_patterns import (
     TRITON_MEMORY_OPT_PATTERNS,
     TRITON_COMPUTE_OPT_PATTERNS,
     TRITON_PARALLELISM_OPT_PATTERNS,
+    METAL_MEMORY_OPT_PATTERNS,
+    METAL_COMPUTE_OPT_PATTERNS,
+    METAL_PARALLELISM_OPT_PATTERNS,
 )
 
 # Import QD gradient module for transition tracking (optional, gracefully degrades)
@@ -249,6 +252,14 @@ class OptimizationFeatureClassifier:
                 OPENCL_COMPUTE_OPT_PATTERNS,
                 OPENCL_PARALLELISM_OPT_PATTERNS,
                 ESIMD_OPT_PATTERNS,  # Include ESIMD patterns
+                # Triton and Metal tables were missing here, so their regexes never compiled and
+                # every Triton/Metal kernel classified as level 0.
+                TRITON_MEMORY_OPT_PATTERNS,
+                TRITON_COMPUTE_OPT_PATTERNS,
+                TRITON_PARALLELISM_OPT_PATTERNS,
+                METAL_MEMORY_OPT_PATTERNS,
+                METAL_COMPUTE_OPT_PATTERNS,
+                METAL_PARALLELISM_OPT_PATTERNS,
             ]
 
             patterns_compiled = 0
@@ -445,6 +456,11 @@ class OptimizationFeatureClassifier:
             compute_patterns = TRITON_COMPUTE_OPT_PATTERNS
             parallelism_patterns = TRITON_PARALLELISM_OPT_PATTERNS
             esimd_patterns = {}  # ESIMD not applicable to Triton
+        elif lang in ["metal"]:
+            memory_patterns = METAL_MEMORY_OPT_PATTERNS
+            compute_patterns = METAL_COMPUTE_OPT_PATTERNS
+            parallelism_patterns = METAL_PARALLELISM_OPT_PATTERNS
+            esimd_patterns = {}  # ESIMD not applicable to Metal
         elif lang in ["sycl"]:
             memory_patterns = MEMORY_OPT_PATTERNS
             compute_patterns = COMPUTE_OPT_PATTERNS
@@ -452,7 +468,7 @@ class OptimizationFeatureClassifier:
             esimd_patterns = ESIMD_OPT_PATTERNS  # ESIMD only for SYCL
         else:
             raise ValueError(
-                f"Unsupported language '{language}' for classification. Supported: sycl, cuda, opencl, ocl, cl, cu, triton"
+                f"Unsupported language '{language}' for classification. Supported: sycl, cuda, opencl, ocl, cl, cu, triton, metal"
             )
 
         # Classify each dimension
@@ -500,6 +516,12 @@ class OptimizationFeatureClassifier:
             compute_patterns = TRITON_COMPUTE_OPT_PATTERNS
             parallelism_patterns = TRITON_PARALLELISM_OPT_PATTERNS
             esimd_patterns = {}  # ESIMD not applicable to Triton
+        elif lang in ["metal"]:
+            logging.info("Classifying Metal code - using Metal-specific patterns")
+            memory_patterns = METAL_MEMORY_OPT_PATTERNS
+            compute_patterns = METAL_COMPUTE_OPT_PATTERNS
+            parallelism_patterns = METAL_PARALLELISM_OPT_PATTERNS
+            esimd_patterns = {}  # ESIMD not applicable to Metal
         elif lang in ["sycl"]:
             memory_patterns = MEMORY_OPT_PATTERNS
             compute_patterns = COMPUTE_OPT_PATTERNS
@@ -575,6 +597,13 @@ class OptimizationFeatureClassifier:
                 "compute": TRITON_COMPUTE_OPT_PATTERNS,
                 "parallelism": TRITON_PARALLELISM_OPT_PATTERNS,
                 "esimd": {},  # ESIMD not applicable to Triton
+            }
+        elif lang in ["metal"]:
+            pattern_sets = {
+                "memory": METAL_MEMORY_OPT_PATTERNS,
+                "compute": METAL_COMPUTE_OPT_PATTERNS,
+                "parallelism": METAL_PARALLELISM_OPT_PATTERNS,
+                "esimd": {},  # ESIMD not applicable to Metal
             }
         elif lang in ["sycl"]:
             pattern_sets = {

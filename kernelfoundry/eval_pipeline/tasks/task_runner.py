@@ -18,7 +18,7 @@ import logging
 import threading
 
 # languages with supported compilers
-BUILD_SUPPORTED_LANGUAGES = ["cuda", "sycl", "ocl", "triton"]
+BUILD_SUPPORTED_LANGUAGES = ["cuda", "sycl", "ocl", "triton", "metal"]
 
 
 class TaskRunner:

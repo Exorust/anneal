@@ -150,7 +150,7 @@ class ProblemLogger:
 
     def save_gen_kernel_w_version(self, custom_kernel: str, language: str, version: int) -> str:
         """Save the generated kernel code with versioning."""
-        fn_end = "cu" if language.lower() == "cuda" else "sycl"
+        fn_end = {"cuda": "cu", "triton": "py", "metal": "py"}.get(language.lower(), "sycl")
         kernel_save_path = os.path.join(self.logdir, self.gen_code_fn[:-3] + f"_v{version}.{fn_end}")
         with open(kernel_save_path, "w", encoding="utf-8") as f:
             f.write(custom_kernel)

@@ -21,8 +21,8 @@ from kernelfoundry.algorithm.utils.extract_code import replace_function_calls
 _TASKS_DIR = os.path.join(PACKAGE_ROOT.parent, "tasks")
 KERNELBENCH_TASK_TEMPLATE = os.path.join(_TASKS_DIR, "kernelbench")
 BACKWARD_TASK_TEMPLATE = os.path.join(_TASKS_DIR, "robust_kbench_backward")
-FN_ENDING_DICT = {"SYCL": "sycl", "triton": "py", "CUDA": "cu"}
-COMMENT_DICT = {"SYCL": "//", "triton": "#", "CUDA": "//"}
+FN_ENDING_DICT = {"SYCL": "sycl", "triton": "py", "CUDA": "cu", "metal": "py"}
+COMMENT_DICT = {"SYCL": "//", "triton": "#", "CUDA": "//", "metal": "#"}
 
 PYTORCH_FUNCTIONALS_PATH = os.path.join(_TASKS_DIR, "pytorch_functionals.csv")
 

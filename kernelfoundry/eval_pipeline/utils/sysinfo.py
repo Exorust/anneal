@@ -360,6 +360,31 @@ def get_nvidia_compute_capabilities() -> list[str]:
     return list(capabilities)
 
 
+def get_apple_chip_name() -> str:
+    """Get the Apple Silicon chip name (e.g. "Apple M5") on macOS, else an empty string."""
+    if sys.platform != "darwin":
+        return ""
+    try:
+        result = subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"], capture_output=True, text=True)
+        if result.returncode == 0 and result.stdout.strip().startswith("Apple"):
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return ""
+
+
+def get_apple_gpu_arch() -> str | None:
+    """Map the Apple chip name to a gpu_arch key: "Apple M4 Pro" -> "apple_m4_pro". Falls back to the
+    generic "apple" key when no chip-specific entry exists in ARCH_TO_SPECS."""
+    name = get_apple_chip_name()
+    if not name:
+        return None
+    from kernelfoundry.eval_pipeline.utils.gpu_specs import ARCH_TO_SPECS
+
+    arch = name.lower().replace(" ", "_")
+    return arch if arch in ARCH_TO_SPECS else "apple"
+
+
 def get_nvidia_gpu_name() -> str:
     """Get the first NVIDIA GPU name if present.
 
@@ -385,7 +410,7 @@ def get_worker_info():
         dict: System info map including compiler, driver, and device details.
     """
     if get_worker_info.info is None:
-        gpu_name = get_nvidia_gpu_name()
+        gpu_name = get_nvidia_gpu_name() or get_apple_chip_name()
         try:
             _, device_id, pci_addr = select_intel_gpu()
             gpu_name = get_device_name_by_pci_address(pci_addr)

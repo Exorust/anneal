@@ -427,6 +427,10 @@ def get_profilers(language: str, arch: str, profiler_type: str | None = None) ->
     """Get the appropriate profiler class based on user-specified profiler type or language & GPU architecture."""
     language = language.lower()
 
+    if language == "metal" and profiler_type is None:
+        # ponytail: no Metal profiler integration yet; add an xctrace-based Profiler when needed
+        return []
+
     if profiler_type is None:
         if language in ["pytorch", "triton"]:
             gpu_arch_is_cuda = arch in VALID_CUDA_ARCHS

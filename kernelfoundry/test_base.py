@@ -145,7 +145,15 @@ class TestBase(ABC):
             str: GPU architecture string.
         """
         arch = None
-        from kernelfoundry.eval_pipeline.utils.sysinfo import get_nvidia_compute_capabilities, select_intel_gpu
+        from kernelfoundry.eval_pipeline.utils.sysinfo import (
+            get_apple_gpu_arch,
+            get_nvidia_compute_capabilities,
+            select_intel_gpu,
+        )
+
+        apple_arch = get_apple_gpu_arch()
+        if apple_arch is not None:
+            return apple_arch
 
         intel_gpu = select_intel_gpu()
         if intel_gpu is not None:

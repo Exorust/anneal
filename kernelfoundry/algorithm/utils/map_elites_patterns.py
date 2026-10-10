@@ -2122,3 +2122,197 @@ TRITON_PARALLELISM_OPT_PATTERNS = {
         },
     },
 }
+
+
+# =============================================================================
+# METAL (Apple GPU) PATTERNS
+# =============================================================================
+# Metal Shading Language kernels embedded in a Python file and compiled through
+# torch.mps.compile_shader. Terminology: threadgroup = CUDA block, simdgroup = warp
+# (32 lanes on Apple GPUs), threadgroup memory = shared memory.
+# ponytail: deliberately small pattern sets; extend when MAP-Elites cells look too coarse.
+
+METAL_MEMORY_OPT_PATTERNS = {
+    # Level 0: scalar device-memory loads, one element per thread
+    0: {},
+    # Level 1: vectorized / read-only / contiguous access
+    1: {
+        "vector_types": {
+            "weight": 1.0,
+            "patterns": [
+                r"\b(?:float|half)[248]\b",
+                r"\bpacked_(?:float|half)[248]\b",
+                r"\bas_type<",
+            ],
+        },
+        "half_storage": {
+            "weight": 0.7,
+            "patterns": [
+                r"\bhalf\b",
+                r"\bbfloat\b",
+            ],
+        },
+    },
+    # Level 2: threadgroup (shared) memory tiling
+    2: {
+        "threadgroup_memory": {
+            "weight": 1.0,
+            "patterns": [
+                r"\bthreadgroup\s+(?:float|half|int|uint)\w*\s+\w+\s*\[",
+                r"\[\[threadgroup\(\d+\)\]\]",
+            ],
+        },
+        "threadgroup_barrier": {
+            "weight": 0.9,
+            "patterns": [
+                r"threadgroup_barrier\s*\(\s*mem_flags::mem_threadgroup",
+            ],
+        },
+        "tile_constants": {
+            "weight": 0.7,
+            "patterns": [
+                r"\bTILE(?:_SIZE|_[MNK])?\s*=",
+                r"constant\s+(?:uint|int)\s+TILE",
+                r"#define\s+TILE",
+            ],
+        },
+    },
+    # Level 3: simdgroup matrix loads, double buffering, register blocking
+    3: {
+        "simdgroup_load_store": {
+            "weight": 1.0,
+            "patterns": [
+                r"simdgroup_load\s*\(",
+                r"simdgroup_store\s*\(",
+            ],
+        },
+        "double_buffering": {
+            "weight": 0.9,
+            "patterns": [
+                r"threadgroup\s+\w+\s+\w+\s*\[\s*2\s*\]\s*\[",
+                r"\bstage\s*\^=\s*1\b",
+                r"\bbuf\s*=\s*1\s*-\s*buf\b",
+            ],
+        },
+        "register_blocking": {
+            "weight": 0.8,
+            "patterns": [
+                r"\bfloat\s+acc\s*\[\s*\w+\s*\]\s*\[\s*\w+\s*\]",
+                r"\bfloat4\s+acc\s*\[",
+            ],
+        },
+    },
+}
+
+METAL_COMPUTE_OPT_PATTERNS = {
+    # Level 0: naive scalar loop
+    0: {},
+    # Level 1: fused multiply-add, unrolling, register accumulators
+    1: {
+        "fma": {
+            "weight": 1.0,
+            "patterns": [
+                r"\bfma\s*\(",
+                r"\bmetal::fma\s*\(",
+            ],
+        },
+        "unroll": {
+            "weight": 0.8,
+            "patterns": [
+                r"#pragma\s+unroll",
+                r"#pragma\s+clang\s+loop\s+unroll",
+            ],
+        },
+        "register_accumulators": {
+            "weight": 0.7,
+            "patterns": [
+                r"\bfloat\s+acc\s*\[",
+                r"\bfloat4\s+acc\b",
+            ],
+        },
+    },
+    # Level 2: simdgroup collectives and fast math
+    2: {
+        "simd_reductions": {
+            "weight": 1.0,
+            "patterns": [
+                r"\bsimd_(?:sum|max|min|prefix_inclusive_sum|prefix_exclusive_sum)\s*\(",
+                r"\bsimd_shuffle(?:_down|_up|_xor)?\s*\(",
+                r"\bsimd_broadcast\s*\(",
+            ],
+        },
+        "fast_math": {
+            "weight": 0.7,
+            "patterns": [
+                r"\bfast::\w+\s*\(",
+                r"\bprecise::\w+\s*\(",
+                r"\brsqrt\s*\(",
+            ],
+        },
+    },
+    # Level 3: simdgroup matrix (tensor-core style) multiply
+    3: {
+        "simdgroup_matrix": {
+            "weight": 1.0,
+            "patterns": [
+                r"\bsimdgroup_(?:float|half|bfloat)8x8\b",
+                r"\bsimdgroup_matrix<",
+                r"simdgroup_multiply_accumulate\s*\(",
+                r"simdgroup_multiply\s*\(",
+            ],
+        },
+    },
+}
+
+METAL_PARALLELISM_OPT_PATTERNS = {
+    # Level 0: one thread per output, default threadgroup size
+    0: {},
+    # Level 1: explicit threadgroup geometry
+    1: {
+        "threadgroup_geometry": {
+            "weight": 1.0,
+            "patterns": [
+                r"\[\[thread_position_in_threadgroup\]\]",
+                r"\[\[threadgroup_position_in_grid\]\]",
+                r"\[\[threads_per_threadgroup\]\]",
+            ],
+        },
+    },
+    # Level 2: multiple outputs per thread, simdgroup-aware indexing
+    2: {
+        "simdgroup_indexing": {
+            "weight": 1.0,
+            "patterns": [
+                r"\[\[simdgroup_index_in_threadgroup\]\]",
+                r"\[\[thread_index_in_simdgroup\]\]",
+                r"\[\[threads_per_simdgroup\]\]",
+            ],
+        },
+        "multiple_outputs_per_thread": {
+            "weight": 0.9,
+            "patterns": [
+                r"for\s*\(\s*(?:uint|int)\s+\w+\s*=\s*0\s*;\s*\w+\s*<\s*T[MN]\b",
+                r"\bT[MN]\s*=\s*\d+",
+                r"\bPER_THREAD\b",
+            ],
+        },
+    },
+    # Level 3: persistent / tile-loop kernels, split-K, non-uniform threadgroups
+    3: {
+        "persistent_tiles": {
+            "weight": 1.0,
+            "patterns": [
+                r"for\s*\(\s*(?:uint|int)\s+tile\w*\s*=",
+                r"\bnum_tiles\b",
+                r"\bsplit_k\b|\bSPLIT_K\b",
+            ],
+        },
+        "atomics": {
+            "weight": 0.7,
+            "patterns": [
+                r"atomic_fetch_add_explicit\s*\(",
+                r"\batomic_(?:float|uint|int)\b",
+            ],
+        },
+    },
+}

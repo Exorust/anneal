@@ -43,6 +43,7 @@ class Backend(Enum):
     CUDA = auto()  # NVIDIA CUDA
     OPENCL = auto()  # Khronos OpenCL
     TRITON = auto()  # OpenAI Triton (future)
+    METAL = auto()  # Apple Metal Shading Language via torch.mps.compile_shader
 
     @classmethod
     def from_string(cls, s: Optional[str]) -> "Backend":
@@ -73,10 +74,13 @@ class Backend(Enum):
             "OCL": cls.OPENCL,
             "KHRONOS": cls.OPENCL,
             "TRITON": cls.TRITON,
+            "METAL": cls.METAL,
+            "MPS": cls.METAL,
+            "APPLE": cls.METAL,
         }
         if s_upper in mapping:
             return mapping[s_upper]
-        raise ValueError(f"Unknown backend: {s}. Supported: SYCL, CUDA, OCL, TRITON")
+        raise ValueError(f"Unknown backend: {s}. Supported: SYCL, CUDA, OCL, TRITON, METAL")
 
     @property
     def supports_explicit_simd(self) -> bool:
@@ -96,6 +100,7 @@ class Backend(Enum):
             Backend.CUDA: "CUDA",
             Backend.OPENCL: "OCL",
             Backend.TRITON: "Triton",
+            Backend.METAL: "Metal",
         }
         return names.get(self, self.name)
 
@@ -221,6 +226,24 @@ def _get_opencl_memory_optimization_instructions(level: int) -> str:
     return _prompt_text("memory", "opencl", key, default=_prompt_text("memory", "opencl", "3"))
 
 
+def _get_metal_memory_optimization_instructions(level: int) -> str:
+    """Get Metal-specific instructions for memory optimization at given level."""
+    key = str(level)
+    return _prompt_text("memory", "metal", key, default=_prompt_text("memory", "metal", "3"))
+
+
+def _get_metal_compute_optimization_instructions(level: int) -> str:
+    """Get Metal-specific instructions for compute optimization at given level."""
+    key = str(level)
+    return _prompt_text("compute", "metal", key, default=_prompt_text("compute", "metal", "3"))
+
+
+def _get_metal_parallelism_optimization_instructions(level: int) -> str:
+    """Get Metal-specific instructions for parallelism optimization at given level."""
+    key = str(level)
+    return _prompt_text("parallelism", "metal", key, default=_prompt_text("parallelism", "metal", "3"))
+
+
 def _get_triton_memory_optimization_instructions(level: int) -> str:
     """Get Triton-specific instructions for memory optimization at given level."""
     key = str(level)
@@ -312,6 +335,8 @@ def get_memory_optimization_instructions(level: int, backend: Optional[Union[Bac
         return _get_opencl_memory_optimization_instructions(level)
     if backend == Backend.TRITON:
         return _get_triton_memory_optimization_instructions(level)
+    if backend == Backend.METAL:
+        return _get_metal_memory_optimization_instructions(level)
     if backend == Backend.SYCL:
         return _get_memory_optimization_instructions(level)
     raise ValueError(f"Unsupported backend '{backend}' for memory optimization instructions")
@@ -339,6 +364,8 @@ def get_compute_optimization_instructions(level: int, backend: Optional[Union[Ba
         return _get_opencl_compute_optimization_instructions(level)
     if backend == Backend.TRITON:
         return _get_triton_compute_optimization_instructions(level)
+    if backend == Backend.METAL:
+        return _get_metal_compute_optimization_instructions(level)
     if backend == Backend.SYCL:
         return _get_compute_optimization_instructions(level)
     raise ValueError(f"Unsupported backend '{backend}' for compute optimization instructions")
@@ -366,6 +393,8 @@ def get_parallelism_optimization_instructions(level: int, backend: Optional[Unio
         return _get_opencl_parallelism_optimization_instructions(level)
     if backend == Backend.TRITON:
         return _get_triton_parallelism_optimization_instructions(level)
+    if backend == Backend.METAL:
+        return _get_metal_parallelism_optimization_instructions(level)
     if backend == Backend.SYCL:
         return _get_parallelism_optimization_instructions(level)
     raise ValueError(f"Unsupported backend '{backend}' for parallelism optimization instructions")
@@ -394,6 +423,8 @@ def get_explicit_simd_instructions(backend: Optional[Union[Backend, str]] = None
         return _get_opencl_explicit_simd_instructions()
     if backend == Backend.TRITON:
         return ""  # Triton has no explicit SIMD; use tl.dot for tensor core dispatch
+    if backend == Backend.METAL:
+        return _prompt_text("explicit_simd", "metal_simdgroup_matrix")
     if backend == Backend.SYCL:
         return _get_esimd_instructions()
     raise ValueError(f"Unsupported backend '{backend}' for explicit SIMD instructions")
@@ -477,6 +508,8 @@ def _get_antipatterns_section(backend: Optional[Union[Backend, str]] = None) -> 
         return _get_opencl_antipatterns_section()
     if backend == Backend.TRITON:
         return _get_triton_antipatterns_section()
+    if backend == Backend.METAL:
+        return _prompt_text("antipatterns", "metal")
     if backend == Backend.SYCL:
         return _get_sycl_antipatterns_section()
     raise ValueError(f"Unsupported backend '{backend}' for antipatterns section")
@@ -523,6 +556,8 @@ def _get_performance_hints_section(backend: Optional[Union[Backend, str]] = None
         return _get_opencl_performance_hints_section()
     if backend == Backend.TRITON:
         return _get_triton_performance_hints_section()
+    if backend == Backend.METAL:
+        return _prompt_text("performance_hints", "metal")
     if backend == Backend.SYCL:
         return _get_sycl_performance_hints_section()
     raise ValueError(f"Unsupported backend '{backend}' for performance hints section")
@@ -630,6 +665,15 @@ def _collect_techniques_for_profile(
     techniques = []
     is_cuda = backend == Backend.CUDA
     is_triton = backend == Backend.TRITON
+
+    if backend == Backend.METAL:
+        for dim, key in (("memory", "memory_opt"), ("compute", "compute_opt"), ("parallelism", "parallelism_opt")):
+            level = profile.get(key, 0)
+            if level > 0:
+                techniques.extend(_load_dimension_guidance_json("metal", dim, level)[0])
+        if include_esimd and profile.get("esimd_opt", 0) > 0:
+            techniques.extend(_load_dimension_guidance_json("metal", "simdgroup_matrix", 1)[0])
+        return techniques
 
     memory_level = profile.get("memory_opt", 0)
     if memory_level == 1:
@@ -1042,6 +1086,11 @@ def _get_dimension_guidance(
         return _get_ocl_dimension_guidance(dimension, level)
     if backend == Backend.SYCL:
         return _get_sycl_dimension_guidance(dimension, level)
+    if backend == Backend.METAL:
+        metal_dim = "simdgroup_matrix" if dimension == "esimd" else dimension
+        return _load_dimension_guidance_json("metal", metal_dim, level)
+    if backend == Backend.TRITON:
+        return _load_dimension_guidance_json("triton", dimension, level)
     raise ValueError(f"Unsupported backend '{backend}' for dimension guidance")
 
 
@@ -1094,6 +1143,10 @@ def _get_explicit_simd_upgrade_section(backend: Optional[Union[Backend, str]] = 
         return _get_opencl_upgrade_section()
     if backend == Backend.SYCL:
         return _get_esimd_upgrade_section()
+    if backend == Backend.METAL:
+        return _prompt_text("upgrades", "metal_simdgroup_matrix")
+    if backend == Backend.TRITON:
+        return _prompt_text("upgrades", "triton")
     raise ValueError(f"Unsupported backend '{backend}' for explicit SIMD upgrade section")
 
 

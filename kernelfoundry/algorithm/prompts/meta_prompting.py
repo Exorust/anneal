@@ -434,6 +434,40 @@ Before writing code, analyze:
 After analysis, explain your tiling strategy (grid shape, block sizes, accumulator layout) before presenting the code.""",
     }
 
+    regions_metal = {
+        "optimization_philosophy": f"""When optimizing {language} kernels, follow this philosophy:
+1. **Understand before optimizing**: Analyze the reference implementation to identify the core computation pattern.
+2. **Bandwidth first**: Apple GPUs share unified memory with the CPU; most kernels are memory-bound. Reduce bytes moved before adding ALU tricks.
+3. **Simdgroups over barriers**: A simdgroup is 32 lanes. Prefer simd_* collectives and simdgroup matrices over threadgroup barriers.
+4. **Keep the Python wrapper minimal**: The shader string is compiled with torch.mps.compile_shader; launch it with lib.kernel(*args, threads=..., group_size=...).""",
+        "optimization_strategies": """
+- **Vectorized access**: Load/store float4 or half4 where alignment allows; map thread_position_in_grid.x to the contiguous dimension
+- **Threadgroup tiling**: Stage reused tiles in `threadgroup float tile[TILE][TILE+1]` (padding avoids bank conflicts), sync with `threadgroup_barrier(mem_flags::mem_threadgroup)`
+- **Register blocking**: Compute a micro-tile (e.g. 4x4) per thread with float4 accumulators to raise arithmetic intensity
+- **Simdgroup matrices**: For GEMM-like kernels use `simdgroup_float8x8` with `simdgroup_load` / `simdgroup_multiply_accumulate` / `simdgroup_store`
+- **Simdgroup collectives**: Reductions via `simd_sum`, `simd_max`, `simd_shuffle_down`; only fall back to threadgroup memory across simdgroups
+- **Half storage, float accumulate**: Store inputs/outputs as half or bfloat when tolerances allow, accumulate in float
+- **Group size tuning**: group_size a multiple of 32; 256 for element-wise, (16,16)/(32,8) for 2D tiles; max 1024 threads per threadgroup
+- **Kernel fusion**: Fuse element-wise prologues/epilogues into one kernel to avoid intermediate device buffers""",
+        "common_pitfalls": """
+1. **Missing bounds check**: Dispatch grids need not be multiples of the threadgroup size. Always guard with `if (gid.x >= N || gid.y >= M) return;` before any load or store.
+2. **Wrong argument order**: Buffer and scalar arguments are bound in the order they are passed to `lib.kernel(...)`; `[[buffer(i)]]` indices must match that order.
+3. **Non-contiguous tensors**: Call `.contiguous()` on inputs before passing them; the shader assumes row-major contiguous layout.
+4. **Threadgroup memory overflow**: The limit is 32 KB per threadgroup; `threadgroup float tile[64][65]` is already 16.6 KB.
+5. **Barrier inside divergent code**: `threadgroup_barrier` must be reached by every thread of the threadgroup; never put it inside a thread-dependent branch or after an early `return`.
+6. **Synchronous host calls in the wrapper**: No `.cpu()`, `.item()` or `torch.mps.synchronize()` inside the kernel wrapper; the benchmark synchronizes itself.
+7. **Renaming the entry points**: The Python wrapper outside the evolve block calls `launch(A, B, C, M, K, N)` and the kernel by name; keep those signatures.""",
+        "analysis_guidance": """
+Before writing code, analyze:
+1. **Data flow**: What is read, what is written, what is reused across threads of a threadgroup?
+2. **Computation pattern**: element-wise (1D grid), reduction (simdgroup collectives), matrix multiply (2D tiles + simdgroup matrices), or stencil (threadgroup tile with halo)?
+3. **Bottleneck**: Memory-bound (vectorize, shrink dtypes, fuse) or compute-bound (register blocking, simdgroup_matrix)?
+4. **Grid and group geometry**: threads = problem size, group_size a multiple of 32; one thread per output or a micro-tile per thread?
+5. **Threadgroup memory budget**: Stay under 32 KB including padding and double buffers.
+
+After analysis, explain your tiling strategy (grid shape, group size, tile sizes, accumulator layout) before presenting the code.""",
+    }
+
     # Return appropriate regions based on language
     if language.upper() == "CUDA":
         return regions_cuda
@@ -443,8 +477,10 @@ After analysis, explain your tiling strategy (grid shape, block sizes, accumulat
         return regions_opencl
     elif language.upper() == "TRITON":
         return regions_triton
+    elif language.upper() == "METAL":
+        return regions_metal
     else:
-        raise ValueError(f"Unsupported language: {language}. Supported: CUDA, SYCL, OCL, triton")
+        raise ValueError(f"Unsupported language: {language}. Supported: CUDA, SYCL, OCL, triton, metal")
 
 
 # =============================================================================

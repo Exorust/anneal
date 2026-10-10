@@ -1,0 +1,9 @@
+task_name: matmul # name for the kernel generation task
+job_name: matmul_apple_m5 # a name for the specific job you want to run
+
+gpu_arch: apple_m5 # Apple Silicon chip; see ARCH_TO_SPECS in kernelfoundry/eval_pipeline/utils/gpu_specs.py
+language: metal # Metal Shading Language, compiled at runtime through torch.mps.compile_shader
+
+# Metal kernels are plain Python files; there is nothing to compile ahead of the tests.
+has_build_step: false
+has_reference_build_step: false

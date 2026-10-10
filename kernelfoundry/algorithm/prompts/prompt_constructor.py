@@ -263,6 +263,7 @@ class PromptConstructor:
             "CUDA": {True: "cuda_example_add_raw.cu", False: "model_new_ex_add.py"},
             "SYCL": {True: "sycl_example_add_raw.sycl", False: "model_new_ex_add_sycl.py"},
             "triton": {True: "triton_functional.py", False: "triton_class.py"},
+            "metal": {True: "metal_functional.py", False: "metal_class.py"},
         }
 
         in_example = os.path.join(KERNEL_EXAMPLES, in_path_dict[functional_form])

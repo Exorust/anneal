@@ -1191,8 +1191,24 @@ def get_reference_language_for_profiling(config) -> str:
     return ref_language
 
 
+class NoProfilerFeedback(ProfilerFeedback):
+    """Feedback class for languages without a profiler integration (Metal). Produces no data and
+    no feedback text, so the optimizer runs on timings alone."""
+
+    @property
+    def name(self) -> str:
+        return "none"
+
+    def collate_data(self, outputs: dict[str, dict]) -> dict:
+        return {}
+
+    def create_feedback(self, data: dict, worker_info: dict) -> str:
+        return ""
+
+
 # Mapping of (language, profiler_type) -> profiler feedback class
 _PROFILER_FEEDBACK_MAPPING = {
+    ("metal", None): NoProfilerFeedback,
     ("sycl", "unitrace"): UnitraceProfilerFeedback,
     ("sycl", "vtune"): VTuneProfilerFeedback,
     ("ocl", "unitrace"): OCLUnitraceProfilerFeedback,
@@ -1217,6 +1233,9 @@ def get_profiler_feedback_class(
 ) -> type[ProfilerFeedback]:
     """Get the appropriate profiler feedback class based on user-specified profiler type or language & GPU architecture."""
     language = language.lower()
+
+    if language == "metal" and profiler_type is None:
+        return NoProfilerFeedback
 
     if profiler_type is None:
         if language in ["pytorch", "triton"]:

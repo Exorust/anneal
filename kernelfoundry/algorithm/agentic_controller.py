@@ -38,6 +38,7 @@ from kernelfoundry.algorithm.utils.token_usage import zero_token_usage
 # when filtering skills. The task language maps to the set of accepted values.
 LANGUAGE_ALIASES: dict[str, list[str]] = {
     "opencl": ["opencl", "ocl"],
+    "metal": ["metal", "mps", "apple"],
 }
 
 # def _build_prompt(task: Task) -> str:
