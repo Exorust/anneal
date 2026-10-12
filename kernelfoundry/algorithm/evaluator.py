@@ -16,6 +16,8 @@ from kernelfoundry.eval_pipeline.profiler_feedback import (
 from kernelfoundry.eval_pipeline.tasks.task_runner import TaskRunner
 from kernelfoundry.algorithm.utils.score import combine_template_results
 
+PAIRED_CV_WARN = 0.08  # coefficient of variation above which a paired speedup is reported as noisy
+
 # if there was a timeout during performance benchmarking, we set the speedup to a very low value and runtime high
 SPEEDUP_IF_TIMEOUT: float = 9.999e-10
 RUNTIME_IF_TIMEOUT: float = 9.999e10
@@ -415,23 +417,43 @@ class Evaluator:
         except Exception as e:
             logging.error(f"Failed to process profiler feedback for language {language} with error: {e}")
 
+        # -------- Part 3b: paired benchmarks already carry their speedup --------
+        # measure_runtime_paired times candidate and baseline interleaved in the same process, so
+        # the ratio is immune to drift between a candidate run and a separate --ref run.
+        paired_names = [name for name, stats in ker.runtime_stats.items() if stats.get("paired")]
+        for benchmark_name in paired_names:
+            stats = ker.runtime_stats[benchmark_name]
+            line = f"{benchmark_name}: {stats['median']:.3f} ms, "
+            line += ", ".join(
+                f"{b['speedup']:.3f}x vs {name} ({b['median']:.3f} ms)" for name, b in stats["baselines"].items()
+            )
+            if stats.get("roofline_pct") is not None:
+                line += f", {stats['roofline_pct']:.0f}% of copy roofline"
+            noisy = max([stats["cv"]] + [b["cv"] for b in stats["baselines"].values()])
+            if noisy > PAIRED_CV_WARN:
+                line += f" [noisy: cv {100 * noisy:.0f}%]"
+            self.log(line)
+        unpaired_names = [name for name in ker.runtime_stats if name not in paired_names]
+
         ker.eval_log = self._eval_log.getvalue()
-        if test_result_reference is None:
+        if test_result_reference is None and unpaired_names:
             logging.warning("No reference performance result available, cannot compute speedup.")
             return ker
 
         # -------- Part 4: compute speedup --------
-        perf_res = test_result_reference.performance_result
-        if perf_res is None or perf_res.output_data is None or perf_res.output_data.get("runtimes") is None:
+        perf_res = test_result_reference.performance_result if test_result_reference is not None else None
+        if not unpaired_names:
+            pass  # every benchmark was paired; nothing to look up in the reference run
+        elif perf_res is None or perf_res.output_data is None or perf_res.output_data.get("runtimes") is None:
             logging.warning("No performance result or runtimes available for reference. Set speedup to low value.")
             ker.runtime_improvement = SPEEDUP_IF_TIMEOUT  # low speedup
-            for benchmark_name in ker.runtime_stats.keys():
+            for benchmark_name in unpaired_names:
                 ker.runtime_stats[benchmark_name]["speedup"] = SPEEDUP_IF_TIMEOUT
         else:
             # get reference runtimes
             ref_runtimes = test_result_reference.performance_result.output_data["runtimes"]
             # compute speedup per benchmark (per tested input)
-            for benchmark_name in ker.runtime_stats.keys():
+            for benchmark_name in unpaired_names:
                 if benchmark_name in ref_runtimes:
                     ref_runtime_stats = get_timing_stats(ref_runtimes[benchmark_name])
                     ref_runtime = ref_runtime_stats.get("mean", None)
@@ -459,7 +481,7 @@ class Evaluator:
                     )
                     ker.runtime_stats[benchmark_name]["speedup"] = SPEEDUP_IF_TIMEOUT  # low speedup
 
-            speedups = [stats["speedup"] for stats in ker.runtime_stats.values() if stats["speedup"] > 0]
-            ker.runtime_improvement = gmean(speedups) if speedups else -1
+        speedups = [stats["speedup"] for stats in ker.runtime_stats.values() if stats["speedup"] > 0]
+        ker.runtime_improvement = gmean(speedups) if speedups else -1
 
         return ker

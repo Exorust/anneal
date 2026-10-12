@@ -424,3 +424,121 @@ def measure_runtime_torch(
         profiler_label=profiler_label,
     )
     return result
+
+
+def measure_runtime_paired(
+    target: Callable,
+    baselines: Callable | Mapping[str, Callable],
+    sync_fn: Callable,
+    args: tuple | list | None = None,
+    kwargs: dict | None = None,
+    warmup_min_time: float = 0.5,
+    warmup_min_iters: int = 3,
+    inner_loop_min_time: float = 0.01,
+    perf_trials_min_iters: int = 11,
+    perf_trials_min_time: float = 1.0,
+    cv_warn: float = 0.08,
+    bytes_per_call: int | None = None,
+    peak_bandwidth_gbs: float | None = None,
+    info_str: str = "",
+    output: dict | None = None,
+) -> dict:
+    """Time the target interleaved with one or more baselines (A/B/A/B).
+
+    The speedup that matters is the ratio candidate vs. baseline measured under the same
+    conditions. Timing the two in separate processes (``measure_runtime`` + a ``--ref`` run)
+    lets thermal drift and background load land on one side only; on a laptop GPU that is
+    a 10-30% error. Here every trial times each callable once, back to back, alternating
+    the order on every other trial, and the speedup is the median of the per-trial ratios.
+
+    Args:
+        target: The candidate kernel callable.
+        baselines: One callable, or a mapping ``{name: callable}``. The first entry is the
+            primary baseline that defines ``speedup``; the others are reported alongside
+            (e.g. ``{"champion": best_so_far, "reference": framework_op}``).
+        sync_fn: Device synchronization function, called before and after every timed call.
+        args, kwargs: Arguments passed to every callable (shared, not replicated).
+        warmup_min_time, warmup_min_iters: Warm-up rounds (each round runs every callable once).
+        inner_loop_min_time: Calls are batched into blocks of at least this long for sub-ms kernels.
+        perf_trials_min_iters, perf_trials_min_time: Number of timed rounds.
+        cv_warn: Log a warning when the coefficient of variation of any series exceeds this.
+        bytes_per_call: Minimal device traffic of one call; with ``peak_bandwidth_gbs`` it gives
+            the roofline fraction the candidate reaches.
+        peak_bandwidth_gbs: Achievable copy bandwidth of the device in GB/s (probe it once; do not
+            use the datasheet number).
+        info_str: Prefix for the log lines.
+        output: Optional dict that receives the same record this function returns.
+
+    Returns:
+        dict with keys ``candidate`` (list of ms), ``baselines`` ({name: list of ms}),
+        ``primary`` (name of the primary baseline), ``paired`` (True), and the roofline inputs.
+        Per-series statistics and the median pair ratio are derived from it by
+        :func:`kernelfoundry.algorithm.utils.score.get_timing_stats`.
+    """
+    if callable(baselines):
+        baselines = {"baseline": baselines}
+    baselines = dict(baselines)
+    assert baselines, "measure_runtime_paired needs at least one baseline"
+    args = tuple(args) if args is not None else tuple()
+    kwargs = dict(kwargs) if kwargs is not None else {}
+    fns = {"candidate": target, **baselines}
+    assert len(fns) == len(baselines) + 1, "'candidate' is a reserved baseline name"
+
+    def timed(fn, iters):
+        sync_fn()
+        tic = time.perf_counter()
+        for _ in range(iters):
+            fn(*args, **kwargs)
+        sync_fn()
+        return (time.perf_counter() - tic) / iters * 1000.0
+
+    # one probe round sizes the warm-up, the inner block and the trial count
+    probe_ms = {name: timed(fn, 1) for name, fn in fns.items()}
+    round_s = sum(probe_ms.values()) / 1000.0
+    inner_iters = max(1, int(inner_loop_min_time / (min(probe_ms.values()) / 1000.0)))
+    num_warmup = max(warmup_min_iters, int(warmup_min_time / max(round_s, 1e-9)))
+    for _ in range(num_warmup):
+        for fn in fns.values():
+            timed(fn, 1)
+    num_trials = max(perf_trials_min_iters, int(perf_trials_min_time / max(round_s * inner_iters, 1e-9)))
+    logging.info(
+        f"[Paired performance test] {info_str} warm up {num_warmup}, trials {num_trials} ({inner_iters} passes each), "
+        f"series: {', '.join(fns)}"
+    )
+
+    times = {name: [] for name in fns}
+    names = list(fns)
+    for trial in range(num_trials):
+        order = names if trial % 2 == 0 else names[::-1]  # ABBA cancels first/second-position bias
+        for name in order:
+            times[name].append(timed(fns[name], inner_iters))
+
+    record = {
+        "paired": True,
+        "candidate": times["candidate"],
+        "baselines": {name: times[name] for name in baselines},
+        "primary": next(iter(baselines)),
+        "bytes_per_call": bytes_per_call,
+        "peak_bandwidth_gbs": peak_bandwidth_gbs,
+    }
+    # log the derived numbers here as well so a plain pytest run shows them
+    from kernelfoundry.algorithm.utils.score import get_timing_stats
+
+    stats = get_timing_stats(record)
+    for name, b in stats["baselines"].items():
+        logging.info(
+            f"[Paired performance test] {info_str} candidate median {stats['median']:.3f} ms vs {name} "
+            f"{b['median']:.3f} ms -> median pair speedup {b['speedup']:.3f}x (cv cand {100 * stats['cv']:.1f}%, "
+            f"{name} {100 * b['cv']:.1f}%)"
+        )
+    if stats.get("roofline_pct") is not None:
+        logging.info(f"[Paired performance test] {info_str} candidate at {stats['roofline_pct']:.1f}% of copy roofline")
+    noisy = [n for n, cv in [("candidate", stats["cv"])] + [(n, b["cv"]) for n, b in stats["baselines"].items()] if cv > cv_warn]
+    if noisy:
+        logging.warning(
+            f"[Paired performance test] {info_str} high variance (cv > {100 * cv_warn:.0f}%) in {', '.join(noisy)}; "
+            "treat the speedup as uncertain (close other apps, let the device cool, rerun)"
+        )
+    if output is not None:
+        output.update(record)
+    return record

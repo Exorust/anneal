@@ -189,16 +189,53 @@ def fastp(is_correct: np.ndarray, baseline_speed: np.ndarray, actual_speed: np.n
     return fast_p_score / n if n > 0 else 0
 
 
-def get_timing_stats(elapsed_times: list[float], device=None, device_name: str = "unknown") -> dict:
+def _paired_stats(record: dict) -> dict:
+    """Derive speedups from a paired record written by ``measure_runtime_paired``.
+
+    Each baseline gets the median of per-trial ratios (baseline / candidate), its median time and
+    its coefficient of variation. ``speedup`` and ``ref_speed`` are taken from the primary
+    baseline so downstream code (geomean fitness, GUI) needs no special case.
+    """
+    cand = np.asarray(record["candidate"], dtype=float)
+    cv = lambda x: float(np.std(x) / np.mean(x)) if len(x) and np.mean(x) > 0 else 0.0
+    out = {"paired": True, "cv": cv(cand), "baselines": {}}
+    for name, series in record["baselines"].items():
+        b = np.asarray(series, dtype=float)
+        n = min(len(b), len(cand))
+        ratios = b[:n] / cand[:n]
+        out["baselines"][name] = {
+            "median": float(f"{np.median(b):.3g}"),
+            "cv": cv(b),
+            "speedup": float(np.median(ratios)) if n else -1,
+        }
+    primary = record.get("primary") or next(iter(record["baselines"]))
+    out["speedup"] = out["baselines"][primary]["speedup"]
+    out["ref_speed"] = out["baselines"][primary]["median"]
+    out["primary"] = primary
+    nbytes, peak = record.get("bytes_per_call"), record.get("peak_bandwidth_gbs")
+    if nbytes and peak:
+        achieved_gbs = nbytes / (float(np.median(cand)) / 1e3) / 1e9
+        out["roofline_pct"] = float(f"{100 * achieved_gbs / peak:.3g}")
+    return out
+
+
+def get_timing_stats(elapsed_times: list[float] | dict, device=None, device_name: str = "unknown") -> dict:
     """Get timing statistics from a list of elapsed times.
 
     Args:
-        elapsed_times: List of elapsed times in milliseconds
+        elapsed_times: List of elapsed times in milliseconds, or the paired record produced by
+            ``measure_runtime_paired`` (candidate series + interleaved baseline series). For a
+            paired record the speedup is filled in here (median of per-trial ratios) and does
+            not wait for a separate reference run.
         device: CUDA device, record device info
     Returns:
         Dict containing mean, std, min, max and num_trials
         all timing are in ms
     """
+    paired = None
+    if isinstance(elapsed_times, dict):
+        paired = elapsed_times
+        elapsed_times = paired["candidate"]
 
     stats = {
         "mean": float(f"{np.mean(elapsed_times):.3g}"),
@@ -210,6 +247,9 @@ def get_timing_stats(elapsed_times: list[float], device=None, device_name: str =
         "ref_speed": -1,  # can be filled later when reference time is available
         "num_trials": len(elapsed_times),
     }
+
+    if paired is not None:
+        stats.update(_paired_stats(paired))
 
     if device is not None:
         stats["hardware"] = device_name

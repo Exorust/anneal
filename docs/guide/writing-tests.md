@@ -64,6 +64,55 @@ def test_benchmark_my_kernel(self, kernel, device, data, measure_runtime_torch):
 `measure_runtime_torch` handles moving inputs to the device, warmup trials, and storing results
 through `profile_store`. For non-torch workloads use `measure_runtime`.
 
+### Paired benchmark (recommended on laptops and shared machines)
+
+`measure_runtime` times the candidate alone; the reference is timed once per job in a separate
+`--ref` process and the speedup is a ratio of the two means. Anything that drifts between those
+two runs (GPU thermal state, a browser tab, the fan curve) lands on one side of the ratio. On an
+Apple laptop that is a 10-30% error, larger than most real kernel improvements.
+
+`measure_runtime_paired` times the candidate **interleaved** with one or more baselines in the
+same process (A/B/A/B, order alternated every trial) and reports the **median of per-trial
+ratios**, so drift cancels. It also records the coefficient of variation of every series and,
+when given the traffic per call and a probed copy bandwidth, the fraction of the memory roofline
+the candidate reaches:
+
+```python
+@pytest.mark.performance
+def test_benchmark(self, kernel, measure_runtime_paired):
+    import mlx.core as mx
+    import best_so_far  # a frozen copy of the current champion, shipped with the task
+
+    def timed(fn):
+        def run(x):
+            mx.eval(fn(x))      # MLX is lazy: force the work inside the timed call
+        return run
+
+    measure_runtime_paired(
+        timed(kernel),
+        baselines={"champion": timed(best_so_far.kernel), "reference": timed(reference_kernel)},
+        sync_fn=mx.synchronize,
+        args=(x,),
+        bytes_per_call=x.nbytes * 3,      # optional: minimal traffic of one call
+        peak_bandwidth_gbs=125.0,         # optional: probed copy bandwidth, not the datasheet
+    )
+```
+
+The first baseline is the primary one and defines `speedup` (and so the geomean fitness); the
+others are reported next to it in the eval log and in `runtime_stats`. Pairing against the
+current champion rather than the slow framework reference is the point: a 1% regression against
+the champion must not read as a 3x win against the reference. With a paired benchmark the
+separate reference timing pass is not needed, so set `test_reference: false` in `config.yaml`.
+The eval log line looks like
+
+```
+test_benchmark[T16384]: 49.400 ms, 1.004x vs champion (49.600 ms), 3.816x vs scan (188.000 ms), 13% of copy roofline [noisy: cv 18%]
+```
+
+and `[noisy: cv N%]` appears when any series has a coefficient of variation above 8%: treat that
+speedup as uncertain and rerun. Unlike `measure_runtime`, the paired helper does not replicate
+inputs to defeat caches; pass a list of inputs yourself if cache residency matters for your kernel.
+
 ### Writing a custom benchmark
 
 If you need to measure something the helpers don't cover, your function must:

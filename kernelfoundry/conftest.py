@@ -229,6 +229,27 @@ def measure_runtime(request, profile_store) -> Callable:
     return fn
 
 
+@pytest.fixture
+def measure_runtime_paired(request, profile_store) -> Callable:
+    """Create a paired (interleaved A/B) runtime measurement helper with shared output.
+
+    Use this instead of ``measure_runtime`` when the task can call its baseline directly:
+    candidate and baseline(s) are timed back to back in the same process and the speedup is
+    the median of per-trial ratios, so drift between runs cancels out. The record stored for
+    the test is a dict (candidate series + baseline series), which the evaluator turns into
+    ``speedup``/``cv``/``roofline_pct`` via
+    :func:`kernelfoundry.algorithm.utils.score.get_timing_stats`.
+
+    Returns:
+        Callable: :func:`kernelfoundry.eval_pipeline.utils.performance.measure_runtime_paired`
+        with the `output` parameter pre-configured.
+    """
+    from kernelfoundry.eval_pipeline.utils.performance import measure_runtime_paired as _measure_runtime_paired
+
+    profile_store[request.node.nodeid] = {}
+    return partial(_measure_runtime_paired, output=profile_store[request.node.nodeid])
+
+
 @pytest.fixture(scope="session")
 def template_args_wrapper(request) -> bool:
     """Fixture to apply template arguments"""

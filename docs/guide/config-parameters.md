@@ -47,7 +47,7 @@ python -m kernelfoundry.algorithm run task=tasks/example_custom task_origin=cust
 | `stop_once_correct` | bool | Stop as soon as a correct kernel is found. Useful for pure translation tasks. | `false` |
 | `build_timeout` | int | Compilation timeout, seconds. Raise if you see build timeouts. | `200` |
 | `test_timeout` | int | Timeout for execution, correctness testing, benchmarking and profiling, seconds. Raise if tests load models or data. | `300` |
-| `test_reference` | bool | Whether to test and benchmark the reference. Needed to compute speedup; set false only if the reference exists for the prompt but is not executable. | `true` |
+| `test_reference` | bool | Whether to test and benchmark the reference in a separate pass. Needed to compute speedup with `measure_runtime`; not needed when the benchmark uses `measure_runtime_paired` (the speedup comes from the interleaved run), and otherwise set false only if the reference exists for the prompt but is not executable. | `true` |
 | `has_build_step` | bool | Whether the task has a `build` function to compile the kernel. | `true` |
 | `has_reference_build_step` | bool | Whether the reference needs building. False when the reference is e.g. PyTorch. | `true` |
 | `use_feedback_llm` | bool | Use a second LLM to summarize evaluation logs such as compile errors before feeding them back. | `false` |
