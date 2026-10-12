@@ -108,10 +108,13 @@ class InferenceServer:
         if env_var in os.environ and not os.environ[env_var].strip():
             del os.environ[env_var]
         base_url = server_args.get("base_url") or None
+        # api_key_env lets two servers of the same type use different keys (e.g. an OpenAI-
+        # compatible proxy and Z.ai in one ensemble). Default: OPENAI_API_KEY / ANTHROPIC_API_KEY.
+        api_key_env = server_args.get("api_key_env") or f"{server_type.upper()}_API_KEY"
 
         if server_type == "openai":
             client = OpenAI(
-                api_key=os.environ["OPENAI_API_KEY"],
+                api_key=os.environ[api_key_env],
                 base_url=base_url,
                 timeout=self.timeout,
                 max_retries=0,
@@ -123,7 +126,7 @@ class InferenceServer:
                     "Install it with: pip install anthropic"
                 )
             client = anthropic.Anthropic(
-                api_key=os.environ["ANTHROPIC_API_KEY"],
+                api_key=os.environ[api_key_env],
                 base_url=base_url,
                 timeout=self.timeout,
                 max_retries=0,

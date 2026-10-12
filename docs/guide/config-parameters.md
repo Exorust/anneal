@@ -150,6 +150,7 @@ Each server accepts:
 | Parameter | Type | Description | Default |
 | --- | --- | --- | --- |
 | `server_type` | string | `openai` or `anthropic`. | — |
+| `api_key_env` | string | Environment variable holding this server's key, so two servers of one type can use different keys (e.g. a local OpenAI-compatible proxy plus Z.ai). | `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` |
 | `model_name` | string | Model identifier. `default` picks the first known model for that provider. | `default` |
 | `max_tokens` | int | Maximum tokens to generate. | `5000` |
 | `temperature` | float | Sampling temperature; `0.0` is deterministic. | `0.0` |
