@@ -17,6 +17,26 @@ from kernelfoundry.eval_pipeline.tasks.task_runner import TaskRunner
 from kernelfoundry.algorithm.utils.score import combine_template_results
 
 PAIRED_CV_WARN = 0.08  # coefficient of variation above which a paired speedup is reported as noisy
+# Speed-of-light screen for paired benchmarks (config keys implausible_roofline_pct / implausible_speedup).
+# Above the roofline the kernel cannot have moved its own traffic: scored as a failure until hand-checked.
+# Above the speedup prior the score stands but the log asks for a hand check.
+IMPLAUSIBLE_ROOFLINE_PCT = 100.0
+IMPLAUSIBLE_SPEEDUP = 2.0
+
+
+def paired_screen(stats: dict, roof_cap: float, speed_cap: float) -> str:
+    """Speed-of-light screen on one paired benchmark. Mutates ``stats`` and returns a log suffix."""
+    if stats.get("roofline_pct") is not None and stats["roofline_pct"] > roof_cap:
+        stats["implausible"] = True
+        stats["speedup"] = SPEEDUP_IF_TIMEOUT
+        return (
+            f" [IMPLAUSIBLE: {stats['roofline_pct']:.0f}% of copy roofline exceeds {roof_cap:.0f}%; the kernel "
+            "cannot have moved its own traffic. Scored as a failure. Check for cached results, skipped work "
+            "or outputs not written]"
+        )
+    if stats["speedup"] > speed_cap:
+        return f" [verify by hand: {stats['speedup']:.2f}x exceeds the {speed_cap:.1f}x prior for this task]"
+    return ""
 
 # if there was a timeout during performance benchmarking, we set the speedup to a very low value and runtime high
 SPEEDUP_IF_TIMEOUT: float = 9.999e-10
@@ -432,6 +452,11 @@ class Evaluator:
             noisy = max([stats["cv"]] + [b["cv"] for b in stats["baselines"].values()])
             if noisy > PAIRED_CV_WARN:
                 line += f" [noisy: cv {100 * noisy:.0f}%]"
+            line += paired_screen(
+                stats,
+                self.config.get("implausible_roofline_pct", IMPLAUSIBLE_ROOFLINE_PCT),
+                self.config.get("implausible_speedup", IMPLAUSIBLE_SPEEDUP),
+            )
             self.log(line)
         unpaired_names = [name for name in ker.runtime_stats if name not in paired_names]
 

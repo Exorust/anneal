@@ -150,6 +150,9 @@ Each server accepts:
 | Parameter | Type | Description | Default |
 | --- | --- | --- | --- |
 | `server_type` | string | `openai` or `anthropic`. | — |
+| `max_workers` | int | Candidate evaluations per iteration that may run at the same time. Keep 1 on a single shared GPU: concurrent benchmarks time each other. | 1 |
+| `implausible_roofline_pct` | float | Paired benchmark above this percentage of copy roofline is scored as a failure. | 100.0 |
+| `implausible_speedup` | float | Paired speedup above this value is flagged `[verify by hand]` in the eval log. | 2.0 |
 | `api_key_env` | string | Environment variable holding this server's key, so two servers of one type can use different keys (e.g. a local OpenAI-compatible proxy plus Z.ai). | `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` |
 | `model_name` | string | Model identifier. `default` picks the first known model for that provider. | `default` |
 | `max_tokens` | int | Maximum tokens to generate. | `5000` |

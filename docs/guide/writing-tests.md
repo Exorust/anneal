@@ -124,6 +124,29 @@ If you need to measure something the helpers don't cover, your function must:
 That second requirement is the usual cause of a run that reports timings but no profiler
 feedback.
 
+### Hardening options
+
+- **Rotate inputs.** Pass `arg_sets=[args_a, args_b]` instead of `args`; calls cycle through the
+  sets and every series sees the same sequence. A kernel that memoizes on input identity gains
+  nothing. Pre-evaluate the inputs so allocation is not timed.
+- **Recheck after timing.** Compare the candidate's output on one of the sets against the baseline
+  after the timed loop; a kernel that validates once and then returns cached results fails here.
+- **Noise-adaptive trials.** After the minimum rounds the fixture keeps adding rounds while the
+  robust coefficient of variation of the per-trial ratio candidate/primary is above `cv_target`
+  (default 3%), capped by `max_time` (10 s) and `perf_trials_max_iters` (200). The record carries
+  `ratio_cv`.
+- **Held-out shape gate.** Put one or two shapes the prompt does not describe in a *plain* test
+  (not `@pytest.mark.performance`), call `measure_runtime_paired` directly with the baseline only,
+  and assert the speedup is above a floor such as 0.97. A failing correctness-phase test marks the
+  candidate incorrect; a failing performance test does not (only its recorded runtimes count).
+- **Speed-of-light screen.** When the task passes `bytes_per_call` and `peak_bandwidth_gbs`, the
+  evaluator scores any paired benchmark above `implausible_roofline_pct` (default 100) as a failure
+  and flags speedups above `implausible_speedup` (default 2.0) for a hand check. Both are config keys.
+- **Pin compile options outside the evolve block.** For MLX Metal kernels keep the
+  `mx.fast.metal_kernel(...)` call, `compile_options={"math_mode": "safe"}` and input/output names
+  in the wrapper; let the evolve block own the source string and launch constants only, and add a
+  test that greps the block for `metal_kernel(` and `math_mode`.
+
 ## Debugging your tests
 
 With the package installed, you can iterate locally before submitting anything.

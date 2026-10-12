@@ -153,6 +153,12 @@ save_exec_result: false # If true will save the execution (validation) result to
 verbose: True
 debug: True
 max_task_processes: 5 # number of maximal parallel processes in parallel_run
+# Candidate evaluations per iteration that may run at the same time. Keep 1 on a single shared GPU
+# (Apple Silicon): concurrent benchmarks time each other and corrupt the paired speedups.
+max_workers: 1
+# Speed-of-light screen for paired benchmarks (tasks that pass bytes_per_call + peak_bandwidth_gbs).
+implausible_roofline_pct: 100.0  # candidate above this % of copy roofline is scored as a failure
+implausible_speedup: 2.0         # candidate above this speedup vs the primary baseline is flagged for a hand check
 queue_override_test: null # override the queue for testing the task
 queue_override_build: null # override the queue for building the task
 

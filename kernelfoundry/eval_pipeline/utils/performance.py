@@ -438,6 +438,10 @@ def measure_runtime_paired(
     perf_trials_min_iters: int = 11,
     perf_trials_min_time: float = 1.0,
     cv_warn: float = 0.08,
+    arg_sets: list | tuple | None = None,
+    cv_target: float = 0.03,
+    max_time: float = 10.0,
+    perf_trials_max_iters: int = 200,
     bytes_per_call: int | None = None,
     peak_bandwidth_gbs: float | None = None,
     info_str: str = "",
@@ -462,6 +466,13 @@ def measure_runtime_paired(
         inner_loop_min_time: Calls are batched into blocks of at least this long for sub-ms kernels.
         perf_trials_min_iters, perf_trials_min_time: Number of timed rounds.
         cv_warn: Log a warning when the coefficient of variation of any series exceeds this.
+        arg_sets: Several positional-argument tuples; calls cycle through them (every series sees
+            the same sequence), so a kernel that memoizes on input identity gains nothing. Overrides
+            ``args``. Pre-evaluate the inputs so allocation is not timed.
+        cv_target, max_time, perf_trials_max_iters: After the minimum rounds, keep adding rounds
+            while the robust coefficient of variation (MAD-based) of the per-trial ratio
+            candidate/primary is above ``cv_target``, until ``max_time`` seconds of timing or ``perf_trials_max_iters`` rounds.
+            The ratio, not the raw series, is the stop signal: a noisy baseline cancels in the ratio.
         bytes_per_call: Minimal device traffic of one call; with ``peak_bandwidth_gbs`` it gives
             the roofline fraction the candidate reaches.
         peak_bandwidth_gbs: Achievable copy bandwidth of the device in GB/s (probe it once; do not
@@ -479,16 +490,21 @@ def measure_runtime_paired(
         baselines = {"baseline": baselines}
     baselines = dict(baselines)
     assert baselines, "measure_runtime_paired needs at least one baseline"
-    args = tuple(args) if args is not None else tuple()
+    if arg_sets is not None:
+        arg_sets = [tuple(a) for a in arg_sets]
+        assert arg_sets, "arg_sets must hold at least one tuple"
+    else:
+        arg_sets = [tuple(args) if args is not None else tuple()]
+    n_sets = len(arg_sets)
     kwargs = dict(kwargs) if kwargs is not None else {}
     fns = {"candidate": target, **baselines}
     assert len(fns) == len(baselines) + 1, "'candidate' is a reserved baseline name"
 
-    def timed(fn, iters):
+    def timed(fn, iters, start=0):
         sync_fn()
         tic = time.perf_counter()
-        for _ in range(iters):
-            fn(*args, **kwargs)
+        for i in range(iters):
+            fn(*arg_sets[(start + i) % n_sets], **kwargs)
         sync_fn()
         return (time.perf_counter() - tic) / iters * 1000.0
 
@@ -497,9 +513,9 @@ def measure_runtime_paired(
     round_s = sum(probe_ms.values()) / 1000.0
     inner_iters = max(1, int(inner_loop_min_time / (min(probe_ms.values()) / 1000.0)))
     num_warmup = max(warmup_min_iters, int(warmup_min_time / max(round_s, 1e-9)))
-    for _ in range(num_warmup):
+    for r in range(num_warmup):
         for fn in fns.values():
-            timed(fn, 1)
+            timed(fn, 1, r)
     num_trials = max(perf_trials_min_iters, int(perf_trials_min_time / max(round_s * inner_iters, 1e-9)))
     logging.info(
         f"[Paired performance test] {info_str} warm up {num_warmup}, trials {num_trials} ({inner_iters} passes each), "
@@ -508,16 +524,45 @@ def measure_runtime_paired(
 
     times = {name: [] for name in fns}
     names = list(fns)
-    for trial in range(num_trials):
+    primary = next(iter(baselines))
+
+    def run_round(trial):
         order = names if trial % 2 == 0 else names[::-1]  # ABBA cancels first/second-position bias
         for name in order:
-            times[name].append(timed(fns[name], inner_iters))
+            times[name].append(timed(fns[name], inner_iters, trial * inner_iters))
+
+    def ratio_cv():
+        # robust dispersion of the per-trial ratio (1.4826 * MAD / median): the speedup is the median
+        # of this series, so a few early outliers must not keep the loop running forever
+        r = np.asarray(times["candidate"]) / np.asarray(times[primary])
+        if len(r) < 2:
+            return float("inf")
+        med = np.median(r)
+        return float(1.4826 * np.median(np.abs(r - med)) / med)
+
+    t0 = time.perf_counter()
+    for trial in range(num_trials):
+        run_round(trial)
+    # noise-adaptive extension: more rounds until the ratio series is stable or the time cap hits
+    while (
+        ratio_cv() > cv_target
+        and len(times["candidate"]) < perf_trials_max_iters
+        and time.perf_counter() - t0 < max_time
+    ):
+        run_round(len(times["candidate"]))
+    if len(times["candidate"]) > num_trials:
+        logging.info(
+            f"[Paired performance test] {info_str} extended to {len(times['candidate'])} trials "
+            f"(ratio cv {100 * ratio_cv():.1f}%, target {100 * cv_target:.0f}%)"
+        )
 
     record = {
         "paired": True,
         "candidate": times["candidate"],
         "baselines": {name: times[name] for name in baselines},
-        "primary": next(iter(baselines)),
+        "primary": primary,
+        "ratio_cv": ratio_cv(),
+        "n_arg_sets": n_sets,
         "bytes_per_call": bytes_per_call,
         "peak_bandwidth_gbs": peak_bandwidth_gbs,
     }
