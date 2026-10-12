@@ -63,7 +63,7 @@ KERNEL_OPTIMIZATION_TIPS = {
         "Fuse operations into a single kernel when possible to reduce launch overhead and improve data locality.",
     ],
     "metal": [
-        "Keep the whole file as Python: the Metal Shading Language source lives in a string compiled with torch.mps.compile_shader(source); the returned library exposes each `kernel void name(...)` as lib.name(*buffers_and_scalars, threads=..., group_size=...). Pass torch tensors on the mps device as buffers and Python ints/floats as `constant` scalars.",
+        "Keep the whole file as Python and keep the launch API the task already uses. Two are supported: torch.mps.compile_shader(source) (the library exposes each `kernel void name(...)` as lib.name(*tensors_and_scalars, threads=..., group_size=...)) and MLX mx.fast.metal_kernel(name, input_names, output_names, source, header) where the source is the kernel BODY (no signature) and launch takes grid=, threadgroup=, template=, output_shapes=, output_dtypes=. Never switch a task from one API to the other.",
         "Coalesced Access: adjacent threads in a simdgroup (32 lanes on Apple GPUs) should read adjacent addresses. For row-major data, map thread_position_in_grid.x to the contiguous (column) dimension.",
         "Use threadgroup memory for data reused by threads in a threadgroup: `threadgroup float tile[TILE][TILE+1];` loaded cooperatively, then `threadgroup_barrier(mem_flags::mem_threadgroup)` before use. Threadgroup memory is limited to 32 KB per threadgroup.",
         "Vectorize memory traffic with float4/half4 loads and stores; the unified memory system is bandwidth-bound, so halving bytes moved (half/bfloat storage, float accumulate) often beats more ALU work.",
